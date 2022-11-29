@@ -355,11 +355,6 @@ void increase_refcount(PTCB* ptcb) {
 
 void decrease_refcount(PTCB* ptcb) {
   ptcb->refcount--;
-  if(ptcb->refcount == 1){
-    rlist_remove(&(ptcb->ptcb_list_node)); //When the count is = 0 we must remove the ptcb
-    free(ptcb);  // since we used malloc, we must free up the memory we allocated
-
-  }
 }
 
 void start_main_ptcb_thread() {
