@@ -11,6 +11,9 @@
 #include <valgrind/valgrind.h>
 #endif
 
+#define SCHED_QUEUES 10	//number of queues 
+
+int yield_counter;	//every time we yield we add 1
 
 /********************************************
 	
@@ -160,6 +163,7 @@ TCB* spawn_thread(PCB* pcb, void (*func)())
 
 	/* Initialize the other attributes */
 	tcb->ptcb = NULL;
+	tcb->priority = SCHED_QUEUES/2;	//starting with the priority of the middle queue
 	tcb->type = NORMAL_THREAD;
 	tcb->state = INIT;
 	tcb->phase = CTX_CLEAN;
@@ -226,7 +230,7 @@ void release_TCB(TCB* tcb)
   Both of these structures are protected by @c sched_spinlock.
 */
 
-rlnode SCHED; /* The scheduler queue */
+rlnode SCHED[SCHED_QUEUES]; /* The scheduler queue */
 rlnode TIMEOUT_LIST; /* The list of threads with a timeout */
 Mutex sched_spinlock = MUTEX_INIT; /* spinlock for scheduler queue */
 
@@ -269,7 +273,7 @@ static void sched_register_timeout(TCB* tcb, TimerDuration timeout)
 static void sched_queue_add(TCB* tcb)
 {
 	/* Insert at the end of the scheduling list */
-	rlist_push_back(&SCHED, &tcb->sched_node);
+	rlist_push_back(&SCHED[tcb->priority], &tcb->sched_node);
 
 	/* Restart possibly halted cores */
 	cpu_core_restart_one();
@@ -327,8 +331,18 @@ static void sched_wakeup_expired_timeouts()
 */
 static TCB* sched_queue_select(TCB* current)
 {
+	int head = SCHED_QUEUES - 1;
+
+	for(int i = SCHED_QUEUES - 1; i>=0; i--){
+		if(!is_rlist_empty(&SCHED[i])){
+			head = i;
+			break;
+		}
+	}
+
+
 	/* Get the head of the SCHED list */
-	rlnode* sel = rlist_pop_front(&SCHED);
+	rlnode* sel = rlist_pop_front(&SCHED[head]);
 
 	TCB* next_thread = sel->tcb; /* When the list is empty, this is NULL */
 
@@ -414,6 +428,9 @@ void yield(enum SCHED_CAUSE cause)
 
 	TCB* current = CURTHREAD; /* Make a local copy of current process, for speed */
 
+	yield_counter++;	// we we entered yield, so we add 1 to the counter
+
+
 	Mutex_Lock(&sched_spinlock);
 
 	/* Update CURTHREAD state */
@@ -427,6 +444,31 @@ void yield(enum SCHED_CAUSE cause)
 
 	/* Wake up threads whose sleep timeout has expired */
 	sched_wakeup_expired_timeouts();
+
+	if(yield_counter > 2000){
+		boost();	//boosting the thread's priority by 1, to avoid starvation
+		yield_counter = 0;	//since we fixed the problem we set yield_counter back to 0
+	}
+
+	if(current->priority != 0){
+		switch(cause){
+
+		case SCHED_QUANTUM:
+			current->priority--;
+
+		case SCHED_IO:
+			if(current->priority == SCHED_QUEUES){
+				current->priority = SCHED_QUEUES;
+			}else{
+				current->priority++;
+			}
+
+		case SCHED_MUTEX:
+			current->priority--;
+
+		}
+	}
+
 
 	/* Get next */
 	TCB* next = sched_queue_select(current);
@@ -522,8 +564,14 @@ static void idle_thread()
  */
 void initialize_scheduler()
 {
-	rlnode_init(&SCHED, NULL);
+
+	for(int i = 0; i <= SCHED_QUEUES - 1; i++){
+		rlnode_init(&SCHED[i], NULL);
+	}
+
 	rlnode_init(&TIMEOUT_LIST, NULL);
+
+	yield_counter = 0;
 }
 
 void run_scheduler()
@@ -541,6 +589,8 @@ void run_scheduler()
 	curcore->idle_thread.phase = CTX_DIRTY;
 	curcore->idle_thread.wakeup_time = NO_TIMEOUT;
 	rlnode_init(&curcore->idle_thread.sched_node, &curcore->idle_thread);
+
+	curcore->idle_thread.priority = 0;	// idle threads priorit is set to 0
 
 	curcore->idle_thread.its = QUANTUM;
 	curcore->idle_thread.rts = QUANTUM;
@@ -560,4 +610,14 @@ void run_scheduler()
 	assert(CURTHREAD == &CURCORE.idle_thread);
 	cpu_interrupt_handler(ALARM, NULL);
 	cpu_interrupt_handler(ICI, NULL);
+}
+
+void boost(){
+	for(int i = SCHED_QUEUES-1; i>=0; i--){
+		while(!is_rlist_empty(&SCHED[i])){
+			rlnode* curnode = rlist_pop_front(&SCHED[i]);
+			curnode->tcb->priority++;
+			rlist_push_front(&SCHED[i+1], curnode);
+		}
+	}
 }
