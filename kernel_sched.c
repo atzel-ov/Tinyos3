@@ -428,7 +428,7 @@ void yield(enum SCHED_CAUSE cause)
 
 	TCB* current = CURTHREAD; /* Make a local copy of current process, for speed */
 
-	yield_counter++;	// we we entered yield, so we add 1 to the counter
+	yield_counter++;	// Add 1 to counter for the MLFQ
 
 
 	Mutex_Lock(&sched_spinlock);

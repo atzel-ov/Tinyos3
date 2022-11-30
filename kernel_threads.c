@@ -8,6 +8,7 @@
 
 /** 
   @brief Create a new thread in the current process.
+  Initialize the ptcb and make the new thread READY.
   */
 Tid_t sys_CreateThread(Task task, int argl, void* args)
 {
@@ -25,9 +26,10 @@ Tid_t sys_CreateThread(Task task, int argl, void* args)
   
   curproc->thread_count++;  // Since we created a thread we add 1 to the count
 	
-  wakeup(tcb);  //waking up the thread
+  wakeup(tcb);  // thread becomes ready
 
   return (Tid_t)tcb->ptcb;
+  
 }
 
 
@@ -45,6 +47,8 @@ Tid_t sys_ThreadSelf()
 
 /**
   @brief Join the given thread.
+  When the current thread is in RUNNING state, it stops running
+  and waits until the given thread ends
   */
 int sys_ThreadJoin(Tid_t tid, int* exitval)
 {
@@ -66,14 +70,21 @@ int sys_ThreadJoin(Tid_t tid, int* exitval)
     return -1;
   }
 
-  
+  if(ptcb->detached == 1){
+
+    //If the joined thread is detached, it canNOT be joined
+    return -1;
+  }
+
+  // as multiple threads can join each time we call threadJoin, we must store how many so we can free the memory of each one 
   increase_refcount(ptcb); 
 
 
 
   while((ptcb->detached != 1) && (ptcb->exited != 1)) {
 
-    kernel_wait(&(ptcb->exit_cv), SCHED_USER);
+    // putting curthread to SLEEP state at the exit condvar of the joined thread and unlocking curthreads mutex
+    kernel_wait(&(ptcb->exit_cv), SCHED_USER);  
 
   }
 
@@ -83,16 +94,18 @@ int sys_ThreadJoin(Tid_t tid, int* exitval)
 
   if(ptcb->detached == 1){
 
+    //If the thread got detached while the curthread is waiting return -1
     return -1;
   }
 
   if(exitval != NULL){
-    *exitval = ptcb->exitval;
+    *exitval = ptcb->exitval; //while the exit status is not NULL get the new exit status of the joined thread 
   }
 
+  // After everything was successfull we free up the memory used for the joined thread
   if(ptcb->refcount == 1){
-    rlist_remove(&(ptcb->ptcb_list_node)); //When the count is = 0 we must remove the ptcb
-    free(ptcb);  // since we used malloc, we must free up the memory we allocated
+    rlist_remove(&(ptcb->ptcb_list_node)); //When the refcount is 1 we must remove the ptcb
+    free(ptcb);  
 
   }
 
@@ -105,10 +118,12 @@ int sys_ThreadJoin(Tid_t tid, int* exitval)
 
 /**
   @brief Detach the given thread.
+  When a joined thread gets detached all the threads "sleeping" on its exit cv
+  must get signaled and thus ready to start running again
   */
 int sys_ThreadDetach(Tid_t tid)
 {
-  PTCB* ptcb = (PTCB*)tid; //Given thread
+  PTCB* ptcb = (PTCB*)tid; 
   PCB* curproc = CURPROC;
 
   
@@ -150,8 +165,8 @@ void sys_ThreadExit(int exitval)
   ptcb->exitval = exitval; 
   ptcb->exited = 1;
   
-
-  kernel_broadcast(&(ptcb->exit_cv));
+  // the thread is exited thus we unlock the mutex for the next thread to lock it and start running
+  kernel_broadcast(&(ptcb->exit_cv)); 
 
   PCB* curproc = CURPROC;
   curproc->thread_count--;
@@ -190,8 +205,7 @@ void sys_ThreadExit(int exitval)
       Do all the other cleanup we want here, close files etc. 
      */
 
-    /* Clean up the PTCB list nodes*/
-    // rlnode* ptcb_node;
+    /* Clean up PTCB list nodes*/
 
     while(is_rlist_empty(&curproc->ptcb_list) != 0){
 
