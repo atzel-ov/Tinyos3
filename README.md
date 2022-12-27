@@ -1,7 +1,5 @@
 # Tinyos3
-Operating Systems Lab exrcises
-
-Contents:
+Operating Systems Lab exercises
 
 -> Exercise 1
 
