@@ -1,15 +1,6 @@
 # Tinyos3
-Operating Systems Lab exercises
+Operating Systems Lab 
 
--> Exercise 1
+Multi-threaded tiny operating system - 3
 
-Making the operating sytem tinyos3 multi-threaded.
-Implementing the Multi-level Feedback Queue algorithm for scheduling.
-
--> Exercise 2
-
-UNIX File system implementation. Creation of Pipe & Socket functions
-
-Pipes: Read-Write-Close
-
-Sockets: Read-Write-Close-Listen-Accept-Connect
+Implementaion of the Multilevel Feedback Queue Algorithm for optimal scheduling.
